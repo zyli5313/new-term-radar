@@ -1,0 +1,29 @@
+{
+  "lang": "zh",
+
+  "x_accounts": {"labs": [], "bloggers": []},
+
+  "sitemaps": {
+    "toolify":        {"index": "https://www.toolify.ai/sitemap.xml", "shards": "/sitemap_tools_\\d+\\.xml$", "pause": 5, "strip_locale": true},
+    "futuretools":    {"index": "https://futuretools.io/sitemap.xml", "shards": "/tools-\\d+\\.xml$", "pause": 3},
+    "glama":          {"index": "https://glama.ai/sitemap.xml", "shards": "/(mcp-servers|mcp-remote-servers)/\\d+\\.xml$|blog-posts", "pause": 2},
+    "mcp.so":         {"index": "https://mcp.so/sitemap.xml", "shards": "section=(servers|agents|cli|clients|posts)\\b", "pause": 2},
+    "lobehub-mcp":    {"index": "https://lobehub.com/sitemap/mcp.xml", "pause": 5, "strip_locale": true},
+    "lobehub-skills": {"index": "https://lobehub.com/sitemap/skills.xml", "pause": 5, "strip_locale": true}
+  },
+
+  "topics": {
+    "AI 视频": "\\bvideos?\\b|animat|avatar|lip ?sync|seedance|\\bveo\\b|\\bsora\\b|kling|hailuo|remotion|hyperframes",
+    "AI 图像": "\\bimages?\\b|photo|banana|midjourney|flux|upscal|background"
+  },
+
+  "known_terms": ["claude code"],
+  "stop_words": [],
+
+  "judge": {"model": "qwen3.7-flash", "min_score": 0.5},
+  "breakout": {"window_days": 14, "min_stars": 300, "velocity_min": 200, "delta_min": 400},
+  "review": {"after_days": 14, "per_day": 5},
+  "usecases": {"per_day": 0},
+
+  "gsc": {}
+}
