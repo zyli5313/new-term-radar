@@ -106,8 +106,11 @@ def x_new(cfg: dict, state: Path) -> dict:
             vocab[term] = today
     if posts:   # a failed fetch keeps yesterday's vocabulary
         snap.save(path, {term: d for term, d in vocab.items() if d >= cutoff})
+    # Every fetched post, not only the ones holding a new name: they are paid for, and
+    # report.json is what gets archived (xhorizon fork).
+    raw = [{**p, "created": p["created"].isoformat() if p["created"] else None} for p in posts]
     return {"accounts": len(handles), "answered": len(data), "posts": len(posts), "cost_micros": cost,
-            "first_run": first_run, "terms": rows}
+            "first_run": first_run, "terms": rows, "all_posts": raw}
 
 
 _HF_NOISE = re.compile(r"[-_.](gguf|ggml|awq|gptq|fp8|fp16|bf16|int[48]|mlx|exl2|onnx|uncensored|abliterated|"
