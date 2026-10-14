@@ -10,7 +10,9 @@ Set in config.json:
 
 `site` may also be a list of properties, or "all": every property the token can read
 (xhorizon fork). Each site is read on its own, so one failing site does not drop the
-others; their new queries are merged, and the landing page shows which site it was.
+others; their new queries are merged, at most `per_site` (default 5) per site, and the
+landing page shows which site it was. `min_impressions` (default 5) is the floor for a row;
+small sites rarely reach 5 in three days, so with many sites 2 is a better floor.
 
 `token_file` is a Google "authorized user" JSON holding client_id, client_secret and
 refresh_token for the scope webmasters.readonly (what google-auth's
@@ -22,6 +24,7 @@ probing the results, not people.
 from __future__ import annotations
 
 import json
+from collections import Counter
 import os
 import re
 import urllib.parse
@@ -34,6 +37,7 @@ LAG_DAYS = 1
 RECENT, BEFORE = 3, 60
 MIN_IMPRESSIONS = 5
 TOP = 30
+PER_SITE = 5          # with several sites: at most this many rows per site
 ROW_LIMIT = 25000
 _OPERATOR = re.compile(r'"|\b(site|inurl|intitle|intext|filetype):|(^|\s)-\w|\*|\bOR\b')
 
@@ -113,8 +117,20 @@ def gsc_new(cfg: dict) -> dict:
     if errors and len(errors) == len(sites):
         raise RuntimeError("; ".join(f"{s}: {e}" for s, e in errors.items()))
     fresh.sort(key=lambda f: -f["impressions"])
-    out = {"window": f"{start}..{end}", "total_new": len(fresh), "min_impressions": MIN_IMPRESSIONS,
-           "sites": sites, "queries": [f for f in fresh if f["impressions"] >= MIN_IMPRESSIONS][:TOP]}
+    floor = cfg["gsc"].get("min_impressions", MIN_IMPRESSIONS)
+    shown = [f for f in fresh if f["impressions"] >= floor]
+    if len(sites) > 1:
+        # One growing site would fill the table: keep each site's top `per_site`.
+        cap, per, kept = cfg["gsc"].get("per_site", PER_SITE), Counter(), []
+        for f in shown:
+            per[f["site"]] += 1
+            if per[f["site"]] <= cap:
+                kept.append(f)
+        shown = kept
+    else:
+        shown = shown[:TOP]
+    out = {"window": f"{start}..{end}", "total_new": len(fresh), "min_impressions": floor,
+           "sites": sites, "queries": shown}
     if errors:
         out["site_errors"] = errors
     return out

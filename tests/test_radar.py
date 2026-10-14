@@ -867,3 +867,14 @@ def test_gsc_all_reads_every_site_and_survives_one_failing(cfg, monkeypatch):
     out = gsc.gsc_new(cfg)
     assert [q["query"] for q in out["queries"]] == ["photocraft"]
     assert out["sites"] == ["sc-domain:a.com", "sc-domain:b.com"] and "sc-domain:b.com" in out["site_errors"]
+
+
+def test_gsc_caps_rows_per_site_so_one_site_cannot_fill_the_table(cfg, monkeypatch):
+    cfg["gsc"] = {"site": "all", "per_site": 2}
+    monkeypatch.setattr(gsc, "_token", lambda cfg: "tok")
+    monkeypatch.setattr(gsc, "_sites", lambda access: ["a", "b"])
+    rows = {"a": [90, 80, 70, 60], "b": [6]}
+    monkeypatch.setattr(gsc, "_site_new", lambda access, site, start, end: [
+        {"query": f"{site}{n}", "impressions": n, "clicks": 0, "page": "/", "site": site} for n in rows[site]])
+    out = gsc.gsc_new(cfg)
+    assert [q["query"] for q in out["queries"]] == ["a90", "a80", "b6"] and out["total_new"] == 5

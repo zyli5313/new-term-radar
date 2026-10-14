@@ -101,6 +101,8 @@
     "model": "qwen3.7-flash"
   },
   "gsc": {
-    "site": "all"
+    "site": "all",
+    "per_site": 5,
+    "min_impressions": 2
   }
 }
