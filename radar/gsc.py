@@ -8,6 +8,10 @@ Set in config.json:
 
     "gsc": {"site": "sc-domain:example.com", "token_file": "gsc_token.json"}
 
+`site` may also be a list of properties, or "all": every property the token can read
+(xhorizon fork). Each site is read on its own, so one failing site does not drop the
+others; their new queries are merged, and the landing page shows which site it was.
+
 `token_file` is a Google "authorized user" JSON holding client_id, client_secret and
 refresh_token for the scope webmasters.readonly (what google-auth's
 Credentials.to_json() writes; see the README). It is read from the config's directory,
@@ -74,15 +78,43 @@ def fresh_queries(recent: list[dict], before: list[dict]) -> list[dict]:
     return sorted(fresh.values(), key=lambda f: -f["impressions"])
 
 
+READABLE = {"siteOwner", "siteFullUser", "siteRestrictedUser"}
+
+
+def _sites(access: str) -> list[str]:
+    """Every Search Console property the token can read."""
+    req = urllib.request.Request("https://www.googleapis.com/webmasters/v3/sites",
+                                 headers={"Authorization": f"Bearer {access}", "User-Agent": UA})
+    with urllib.request.urlopen(req, timeout=30) as res:
+        entries = json.load(res).get("siteEntry", [])
+    return sorted(e["siteUrl"] for e in entries if e.get("permissionLevel") in READABLE)
+
+
+def _site_new(access: str, site: str, start: date, end: date) -> list[dict]:
+    recent = _query(access, site, start, end, ["query", "page"], fresh=True)
+    before = _query(access, site, start - timedelta(days=BEFORE), start - timedelta(days=1), ["query"], fresh=False)
+    return [{**f, "site": site} for f in fresh_queries(recent, before)]
+
+
 def gsc_new(cfg: dict) -> dict:
     site = cfg["gsc"].get("site")
     if not site:
         return {"off": True}
     access = _token(cfg)
+    sites = _sites(access) if site == "all" else ([site] if isinstance(site, str) else list(site))
     end = date.today() - timedelta(days=LAG_DAYS)
     start = end - timedelta(days=RECENT - 1)
-    recent = _query(access, site, start, end, ["query", "page"], fresh=True)
-    before = _query(access, site, start - timedelta(days=BEFORE), start - timedelta(days=1), ["query"], fresh=False)
-    fresh = fresh_queries(recent, before)
-    return {"window": f"{start}..{end}", "total_new": len(fresh), "min_impressions": MIN_IMPRESSIONS,
-            "queries": [f for f in fresh if f["impressions"] >= MIN_IMPRESSIONS][:TOP]}
+    fresh, errors = [], {}
+    for s in sites:
+        try:
+            fresh += _site_new(access, s, start, end)
+        except Exception as exc:  # noqa: BLE001 — one site down must not stop the others
+            errors[s] = str(exc)[:120]
+    if errors and len(errors) == len(sites):
+        raise RuntimeError("; ".join(f"{s}: {e}" for s, e in errors.items()))
+    fresh.sort(key=lambda f: -f["impressions"])
+    out = {"window": f"{start}..{end}", "total_new": len(fresh), "min_impressions": MIN_IMPRESSIONS,
+           "sites": sites, "queries": [f for f in fresh if f["impressions"] >= MIN_IMPRESSIONS][:TOP]}
+    if errors:
+        out["site_errors"] = errors
+    return out

@@ -111,10 +111,12 @@ def _gsc_lines(gsc: dict) -> list[str]:
         return []
     lines = ["", t("gsc_h"), ""]
     if not gsc.get("queries"):
-        return lines + [t("recent_none", why=_state(gsc, t("gsc_none")))]
+        return lines + [t("recent_none", why=_state(gsc, t("gsc_none")))] + \
+            [f"- {s}: {e}" for s, e in (gsc.get("site_errors") or {}).items()]
     lines += [t("gsc_intro", window=gsc["window"], total=gsc["total_new"], min=gsc["min_impressions"]), "",
               t("gsc_cols"), "|---|---|---|---|"]
-    return lines + [f"| {_cell(q['query'])} | {q['impressions']} | {q['clicks']} | {q['page']} |" for q in gsc["queries"]]
+    lines += [f"| {_cell(q['query'])} | {q['impressions']} | {q['clicks']} | {q['page']} |" for q in gsc["queries"]]
+    return lines + [f"- {s}: {e}" for s, e in (gsc.get("site_errors") or {}).items()]
 
 
 def _review_lines(cfg: dict, rev: dict, summ: dict) -> list[str]:

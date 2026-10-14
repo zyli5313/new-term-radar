@@ -100,5 +100,7 @@
     "per_day": 5,
     "model": "qwen3.7-flash"
   },
-  "gsc": {}
+  "gsc": {
+    "site": "all"
+  }
 }

@@ -852,3 +852,18 @@ def test_the_mcp_command_says_what_is_missing(monkeypatch, capsys):
     monkeypatch.setattr(builtins, "__import__", without_mcp)
     assert cli.main(["mcp"]) == 1
     assert "new-term-radar[mcp]" in capsys.readouterr().err
+
+
+def test_gsc_all_reads_every_site_and_survives_one_failing(cfg, monkeypatch):
+    cfg["gsc"] = {"site": "all"}
+    monkeypatch.setattr(gsc, "_token", lambda cfg: "tok")
+    monkeypatch.setattr(gsc, "_sites", lambda access: ["sc-domain:a.com", "sc-domain:b.com"])
+
+    def site_new(access, site, start, end):
+        if site == "sc-domain:b.com":
+            raise OSError("HTTP 403")
+        return [{"query": "photocraft", "impressions": 9, "clicks": 1, "page": "https://a.com/x", "site": site}]
+    monkeypatch.setattr(gsc, "_site_new", site_new)
+    out = gsc.gsc_new(cfg)
+    assert [q["query"] for q in out["queries"]] == ["photocraft"]
+    assert out["sites"] == ["sc-domain:a.com", "sc-domain:b.com"] and "sc-domain:b.com" in out["site_errors"]
