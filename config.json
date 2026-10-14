@@ -104,5 +104,12 @@
     "site": "all",
     "per_site": 5,
     "min_impressions": 2
+  },
+  "new_sites": {
+    "queries": {
+      "ai": "%ai%",
+      "video": "%video%"
+    },
+    "weekday": 0
   }
 }

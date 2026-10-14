@@ -878,3 +878,15 @@ def test_gsc_caps_rows_per_site_so_one_site_cannot_fill_the_table(cfg, monkeypat
         {"query": f"{site}{n}", "impressions": n, "clicks": 0, "page": "/", "site": site} for n in rows[site]])
     out = gsc.gsc_new(cfg)
     assert [q["query"] for q in out["queries"]] == ["a90", "a80", "b6"] and out["total_new"] == 5
+
+
+def test_new_sites_goes_straight_to_dataforseo_with_its_own_key(cfg, tmp_path, monkeypatch):
+    monkeypatch.setenv("DATAFORSEO_AUTH", "me:pw")
+    monkeypatch.setattr(new_sites.aisa, "call_all", lambda calls: (_ for _ in ()).throw(AssertionError("used AIsa")))
+    item = {"domain": "ai-hailuo.com", "created_datetime": "2026-08-09", "first_seen": "2026-08-16",
+            "metrics": {"organic": {"etv": 1985, "count": 258}}}
+    monkeypatch.setattr(new_sites, "_direct", lambda calls, auth: (
+        {c["call_id"]: {"tasks": [{"result": [{"items": [item]}]}]} for c in calls}, 130800))
+    out = new_sites.new_sites(cfg, tmp_path)
+    assert [s["domain"] for s in out["sites"]] == ["ai-hailuo.com"] and out["cost_micros"] == 130800
+    assert [r["term"] for r in out["terms"]] == ["hailuo"]
