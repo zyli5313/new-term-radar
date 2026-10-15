@@ -3,8 +3,11 @@ Trends and whois data through DataForSEO) and its OpenAI-compatible chat endpoin
 name judge). One key: AISA_API_KEY, or the one the AIsa CLI stores when you log in.
 
 The tool router runs a batch's calls one by one, about 10 s each, so batches are kept to
-BATCH calls and the timeout is long. Every call is billed: a failed batch is never
-retried here, so one bad day costs one batch at most.
+BATCH calls and the timeout is long. Its nginx front answers 504 when a batch runs long
+(2026-10-14: one of seven X batches, and call_all threw the other six away). So a batch
+that fails with a 5xx or a dropped connection is sent once more, and a batch that still
+fails costs only its own calls: call_all keeps every other batch's answers. Every call is
+billed, so the retry is once and never for a 4xx.
 
 Prices seen in October 2026: an account's last 20 posts $0.003, one Trends task $0.0012,
 one whois overview query about $0.13.
@@ -22,13 +25,16 @@ from . import UA
 ROUTER = os.environ.get("AISA_ROUTER_BASE_URL", "https://tools.aisa.one") + "/v1/tool-router/aisa-batch-use"
 CHAT = os.environ.get("AISA_API_BASE_URL", "https://api.aisa.one") + "/v1/chat/completions"
 MAX_CALLS = 20      # the router's own limit per batch
-BATCH = 5           # what call_all sends at once, about 50 s a batch
+BATCH = 3           # what call_all sends at once, about 30 s a batch (5 drew a 504)
+TRIES = 2           # a batch that fails with a 5xx or a dropped connection is sent once more
 TIMEOUT = 240
 CHAT_TIMEOUT = 90
 
 
 class AisaError(RuntimeError):
-    pass
+    def __init__(self, message: str, transient: bool = False):
+        super().__init__(message)
+        self.transient = transient   # a 5xx or a dropped connection: worth sending again
 
 
 def key() -> str:
@@ -59,8 +65,11 @@ def _post(url: str, body: dict, timeout: int) -> dict:
         with urllib.request.urlopen(req, timeout=timeout) as res:
             return json.load(res)
     except urllib.error.HTTPError as exc:
-        raise AisaError(f"HTTP {exc.code}: {' '.join(exc.read().decode('utf-8', 'replace').split())[:200]}") from exc
-    except (OSError, ValueError) as exc:
+        raise AisaError(f"HTTP {exc.code}: {' '.join(exc.read().decode('utf-8', 'replace').split())[:200]}",
+                        transient=exc.code >= 500) from exc
+    except OSError as exc:
+        raise AisaError(f"{type(exc).__name__}: {exc}", transient=True) from exc
+    except ValueError as exc:
         raise AisaError(f"{type(exc).__name__}: {exc}") from exc
 
 
@@ -82,13 +91,31 @@ def call(calls: list[dict]) -> tuple[dict[str, dict], int]:
     return out, cost
 
 
+def _call_retrying(calls: list[dict]) -> tuple[dict[str, dict], int]:
+    for attempt in range(TRIES):
+        try:
+            return call(calls)
+        except AisaError as exc:
+            if not exc.transient or attempt == TRIES - 1:
+                raise
+    raise AssertionError("unreachable")
+
+
 def call_all(calls: list[dict]) -> tuple[dict[str, dict], int]:
-    """call() in batches of BATCH. A failed batch raises and stops the rest."""
-    out, cost = {}, 0
+    """call() in batches of BATCH. A batch that still fails after its retry leaves its
+    calls out of the dict, like calls the router itself failed; only when every batch
+    fails does this raise, so the caller can report the error."""
+    out, cost, error = {}, 0, None
     for i in range(0, len(calls), BATCH):
-        data, c = call(calls[i:i + BATCH])
+        try:
+            data, c = _call_retrying(calls[i:i + BATCH])
+        except AisaError as exc:
+            error = exc
+            continue
         out.update(data)
         cost += c
+    if error and not out:
+        raise error
     return out, cost
 
 
