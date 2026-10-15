@@ -809,6 +809,35 @@ def test_skills_have_a_name_and_a_description():
         assert not re.search(r"\$\d", text)
 
 
+def test_a_gateway_504_costs_one_retry_and_a_lost_batch_only_its_own_calls(monkeypatch):
+    from radar import aisa
+    sent, fail = [], {"h0": 2, "h3": 1}     # h0's batch fails twice, h3's once
+    def call(calls):
+        sent.append([c["call_id"] for c in calls])
+        for cid in sent[-1]:
+            if fail.get(cid):
+                fail[cid] -= 1
+                raise aisa.AisaError("HTTP 504: 504 Gateway Time-out", transient=True)
+        return {cid: {"ok": cid} for cid in sent[-1]}, 3000 * len(calls)
+    monkeypatch.setattr(aisa, "call", call)
+    data, cost = aisa.call_all([{"call_id": f"h{i}"} for i in range(7)])
+    assert sorted(data) == ["h3", "h4", "h5", "h6"] and cost == 4 * 3000
+    assert sent == [["h0", "h1", "h2"], ["h0", "h1", "h2"], ["h3", "h4", "h5"], ["h3", "h4", "h5"], ["h6"]]
+
+
+def test_a_4xx_is_not_retried_and_raises_when_no_batch_answered(monkeypatch):
+    import pytest
+    from radar import aisa
+    sent = []
+    def call(calls):
+        sent.append(calls)
+        raise aisa.AisaError("HTTP 402: no credit")
+    monkeypatch.setattr(aisa, "call", call)
+    with pytest.raises(aisa.AisaError, match="402"):
+        aisa.call_all([{"call_id": f"h{i}"} for i in range(4)])
+    assert len(sent) == 2                      # one try for each of the two batches
+
+
 def test_the_aisa_key_comes_from_the_environment_or_the_cli_login(tmp_path, monkeypatch):
     from radar import aisa
     monkeypatch.setattr(aisa.Path, "home", lambda: tmp_path)
