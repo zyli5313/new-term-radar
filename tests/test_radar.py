@@ -853,6 +853,35 @@ def test_a_4xx_is_not_retried_and_raises_when_no_batch_answered(monkeypatch):
     assert len(sent) == 2                      # one try for each of the two batches
 
 
+def test_the_budget_stops_tool_calls_once_spent_and_the_spend_file_has_the_total(tmp_path, monkeypatch):
+    import pytest
+    from radar import aisa
+    posted = []
+    def post(url, body, timeout):
+        posted.append([c["call_id"] for c in body["calls"]])
+        return {"results": [{"call_id": c["call_id"], "successful": True, "data": {},
+                             "customer_cost_micros_usd": 40000} for c in body["calls"]]}
+    monkeypatch.setattr(aisa, "_post", post)
+    monkeypatch.setattr(aisa, "spent_micros", 0)
+    monkeypatch.setenv("AISA_BUDGET_USD", "0.2")
+    monkeypatch.setenv("AISA_SPEND_FILE", str(tmp_path / "spend"))
+    data, cost = aisa.call_all([{"call_id": f"h{i}"} for i in range(9)])
+    assert len(posted) == 2 and cost == 6 * 40000          # $0.24: the 2nd batch overshoots, the 3rd is refused
+    assert (tmp_path / "spend").read_text() == "240000"
+    with pytest.raises(aisa.AisaError, match="budget reached"):
+        aisa.call([{"call_id": "x"}])
+    assert len(posted) == 2
+
+
+def test_no_budget_means_no_limit(monkeypatch):
+    from radar import aisa
+    monkeypatch.delenv("AISA_BUDGET_USD", raising=False)
+    monkeypatch.delenv("AISA_SPEND_FILE", raising=False)
+    monkeypatch.setattr(aisa, "spent_micros", 10**9)
+    monkeypatch.setattr(aisa, "_post", lambda url, body, timeout: {"results": []})
+    assert aisa.call([{"call_id": "x"}]) == ({}, 0)
+
+
 def test_the_aisa_key_comes_from_the_environment_or_the_cli_login(tmp_path, monkeypatch):
     from radar import aisa
     monkeypatch.setattr(aisa.Path, "home", lambda: tmp_path)

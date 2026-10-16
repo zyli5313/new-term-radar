@@ -11,6 +11,14 @@ billed, so the retry is once and never for a 4xx.
 
 Prices seen in October 2026: an account's last 20 posts $0.003, one Trends task $0.0012,
 one whois overview query about $0.13.
+
+Spend cap: AISA_BUDGET_USD, when set, is what this process may spend on tool calls. Once
+the calls made so far have cost that much, call() refuses before sending anything, so
+the run degrades like a run whose batches failed instead of overspending. Since a batch's
+price is only known afterwards, the last batch can overshoot by at most one batch.
+AISA_SPEND_FILE, when set, gets the process's running total in micro-USD after every
+batch, so a caller can book the real spend even when the run dies halfway. The chat
+endpoint (the name judge, on a free-tier model) is not counted.
 """
 from __future__ import annotations
 
@@ -29,6 +37,21 @@ BATCH = 3           # what call_all sends at once, about 30 s a batch (5 drew a 
 TRIES = 2           # a batch that fails with a 5xx or a dropped connection is sent once more
 TIMEOUT = 240
 CHAT_TIMEOUT = 90
+
+spent_micros = 0    # what this process's tool calls have cost so far
+
+
+def budget_micros() -> int | None:
+    raw = os.environ.get("AISA_BUDGET_USD", "").strip()
+    return None if not raw else max(0, round(float(raw) * 1e6))
+
+
+def _book(cost: int) -> None:
+    global spent_micros
+    spent_micros += cost
+    path = os.environ.get("AISA_SPEND_FILE", "").strip()
+    if path:
+        Path(path).write_text(str(spent_micros))
 
 
 class AisaError(RuntimeError):
@@ -80,6 +103,9 @@ def call(calls: list[dict]) -> tuple[dict[str, dict], int]:
         return {}, 0
     if len(calls) > MAX_CALLS:
         raise AisaError(f"{len(calls)} calls in one batch, the cap is {MAX_CALLS}")
+    budget = budget_micros()
+    if budget is not None and spent_micros >= budget:
+        raise AisaError(f"AIsa budget reached: ${spent_micros / 1e6:.3f} of ${budget / 1e6:.3f} for this run")
     body = _post(ROUTER, {"calls": calls}, TIMEOUT)
     if "error" in body:
         raise AisaError(str(body["error"].get("message") or body["error"])[:200])
@@ -88,6 +114,7 @@ def call(calls: list[dict]) -> tuple[dict[str, dict], int]:
         cost += int(r.get("customer_cost_micros_usd") or 0)
         if r.get("successful"):
             out[r["call_id"]] = r.get("data") or {}
+    _book(cost)
     return out, cost
 
 
